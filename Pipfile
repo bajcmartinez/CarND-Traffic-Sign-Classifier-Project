@@ -13,6 +13,7 @@ opencv-python = "*"
 tensorflow = "*"
 pandas = "*"
 scikit-learn = "*"
+scipy = "*"
 
 [requires]
 python_version = "3.6"
