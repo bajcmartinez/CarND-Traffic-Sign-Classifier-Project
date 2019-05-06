@@ -17,7 +17,10 @@ The goals / steps of this project are the following:
 
 [//]: # (Image References)
 
-[image1]: ./examples/visualization.jpg "Visualization"
+[ev_distribution]: ./assets/distribution.png "Distribution"
+[p_sample]: ./assets/sample.png "Prediction Sample"
+[o_layer1]: ./assets/layer_1.png "Layer 1"
+[o_layer2]: ./assets/layer_2.png "Layer 2"
 
 ### Data Set Summary & Exploration
 
@@ -26,126 +29,175 @@ The goals / steps of this project are the following:
 I used the pandas library to calculate summary statistics of the traffic
 signs data set:
 
-* The size of training set is ?
-* The size of the validation set is ?
-* The size of test set is ?
-* The shape of a traffic sign image is ?
-* The number of unique classes/labels in the data set is ?
+```
+Number of training examples = 34799
+Number of validation examples = 4410
+Number of testing examples = 12630
+Image data shape = (32, 32, 3)
+Number of classes = 43
+```
 
-#### 2. Include an exploratory visualization of the dataset.
+#### 2. Exploratory visualization of the dataset.
 
-Here is an exploratory visualization of the data set. It is a bar chart showing how the data ...
+First to understand the dataset I've plotted on a chart the distribution of samples per class (traffic sign type)
 
-![alt text][image1]
+![alt text][ev_distribution]
+
+The dataset is distribution is not very even, so we will have to work on the dataset to even the distribution, that will help our network train better.
 
 ### Design and Test a Model Architecture
 
 #### 1. Describe how you preprocessed the image data. What techniques were chosen and why did you choose these techniques? Consider including images showing the output of each preprocessing technique. Pre-processing refers to techniques such as converting to grayscale, normalization, etc. (OPTIONAL: As described in the "Stand Out Suggestions" part of the rubric, if you generated additional data for training, describe why you decided to generate additional data, how you generated the data, and provide example images of the additional data. Then describe the characteristics of the augmented training set like number of images in the set, number of images for each class, etc.)
 
-As a first step, I decided to convert the images to grayscale because ...
+This process was the result of a lot of experimentation.
 
-Here is an example of a traffic sign image before and after grayscaling.
+1. I had to decide whether to work with color or grayscale images. Since I couldn't perceive major differences on the performance of the network from one to another I decided to work with grayscale, as it reduces the number of input nodes significally and thus translating in much faster processing of the network   
 
-![alt text][image2]
+2. Image augmentation, as we saw in the exploratory visualization we needed to improve the samples of our dataset, so we did it by generating images from sample images and applying random transformations. The supported transformations are:
+    2.1 Image lighting using LAB space and CLAHE over L channel
+    2.2 Vertical flip
+    2.3 Image rotation
+    2.4 Image translation
+    
+3. Image normalization, convert the values of the matrix into values closer to -1 and 1 instead of 255 scale
 
-As a last step, I normalized the image data because ...
-
-I decided to generate additional data because ... 
-
-To add more data to the the data set, I used the following techniques because ... 
-
-Here is an example of an original image and an augmented image:
-
-![alt text][image3]
-
-The difference between the original data set and the augmented data set is the following ... 
-
+After augmenting our sample set contained 167907. With even higher samples performance was inclining towards better results, however training time was growing and had to cut off for practicality. 
 
 #### 2. Describe what your final model architecture looks like including model type, layers, layer sizes, connectivity, etc.) Consider including a diagram and/or table describing the final model.
 
-My final model consisted of the following layers:
-
-| Layer         		|     Description	        					| 
-|:---------------------:|:---------------------------------------------:| 
-| Input         		| 32x32x3 RGB image   							| 
-| Convolution 3x3     	| 1x1 stride, same padding, outputs 32x32x64 	|
-| RELU					|												|
-| Max pooling	      	| 2x2 stride,  outputs 16x16x64 				|
-| Convolution 3x3	    | etc.      									|
-| Fully connected		| etc.        									|
-| Softmax				| etc.        									|
-|						|												|
-|						|												|
- 
+```
+TrafficSignNet Model Summary
+-------------------------------------------------------------
+Layer      type       in_depth   out_depth  filter_size
+1          conv       1          32         5         
+2          conv       32         64         5         
+3          conv       64         128        5         
+4          dense      20480      240        None      
+5          dense      240        43         None      
+-------------------------------------------------------------
+```
 
 
 #### 3. Describe how you trained your model. The discussion can include the type of optimizer, the batch size, number of epochs and any hyperparameters such as learning rate.
 
-To train the model, I used an ....
+Finding the right parameters for the model was the result of experimenting with the dataset, and different type of models.
+
+In essence the final result is based out of convolution layers that are built like the following:
+
+```python
+def _conv(self, x, out_depth, filter_size=5, max_pooling=True, dropout=True):
+    """
+    Creates a convolution layer
+    
+    :param x: 
+    :param out_depth: 
+    :param filter_size: 
+    :return: convolution layer
+    """
+    self.layer_count += 1
+    self.model_stack.append({
+        'layer': self.layer_count,
+        'type': 'conv',
+        'in_depth': x.get_shape().as_list()[-1],
+        'out_depth': out_depth,
+        'filter_size': 5
+    })
+    
+    conv_w = tf.Variable(tf.truncated_normal(shape=(filter_size, filter_size, x.get_shape().as_list()[-1], out_depth), mean=self.mu, stddev=self.sigma))
+    conv_b = tf.Variable(tf.zeros(out_depth))
+    conv = tf.nn.conv2d(x, conv_w, strides=[1, 1, 1, 1], padding='SAME') + conv_b
+    conv = tf.nn.relu(conv, name="layer_{0}".format(self.layer_count))
+    conv = tf.layers.batch_normalization(conv)
+    
+    if max_pooling:
+        # Max pooling 
+        conv = tf.nn.max_pool(conv, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+    
+    if dropout:
+        # Dropout
+        conv = tf.nn.dropout(conv, keep_prob=self.conv_keep_prob) 
+    
+    return conv
+```
+
+Each convolution layer applies `relu` activation function plus batch normaliation as well as the option for max pooling and dropout.
+
+For dense layers:
+
+```python
+def _dense(self, x, units, last=False):
+    """
+    Creates a dense layer
+    
+    :param x: 
+    :param units: 
+    :return: dense layer
+    """
+    self.layer_count += 1
+    self.model_stack.append({
+        'layer': self.layer_count,
+        'type': 'dense',
+        'in_depth': x.get_shape().as_list()[-1],
+        'out_depth': units,
+        'filter_size': None
+    })
+    
+    dense_w = tf.Variable(tf.truncated_normal(shape=(x.get_shape().as_list()[-1], units), mean=self.mu, stddev=self.sigma)) 
+    dense_b = tf.Variable(tf.zeros(units))
+    dense = tf.matmul(x, dense_w) + dense_b
+    if last:
+        return dense
+    
+    dense = tf.nn.relu(dense, name="layer_{0}".format(self.layer_count))
+    dense = tf.layers.batch_normalization(dense)
+    
+    return tf.nn.dropout(dense, keep_prob=self.dense_keep_prob)
+```
+
+Each dense layers is built on top of the matmul function, with `relu` activation function, batch normalization and optional dropout.
+
+As per the model training, I decided to go with `Adam` optimizer, which allows me to easily update the learning rate according to the decay parameters.
+
+For the network parameters:
+
+```python
+model = TrafficSignNet(learning_rate=0.0001, conv_keep_prob=0.9, dense_keep_prob=0.5, n_classes=n_classes)
+model.train(x_train_augmented, y_train_augmented, X_valid_sample, y_valid, epochs=200, batch_size=512)
+```
+
+Those worked the best, using drop outs with low rate for convolutions and 50% on dense.
+The learning rate wordked best with smaller numbers, but by reducing the learning rate I had to increase the number of epochs to make the network train correctly. 
 
 #### 4. Describe the approach taken for finding a solution and getting the validation set accuracy to be at least 0.93. Include in the discussion the results on the training, validation and test sets and where in the code these were calculated. Your approach may have been an iterative process, in which case, outline the steps you took to get to the final solution and why you chose those steps. Perhaps your solution involved an already well known implementation or architecture. In this case, discuss why you think the architecture is suitable for the current problem.
 
 My final model results were:
-* training set accuracy of ?
-* validation set accuracy of ? 
-* test set accuracy of ?
+* training set accuracy of 0.9995
+* validation set accuracy of 0.9358
+* test set accuracy of 0.9345
 
 If an iterative approach was chosen:
 * What was the first architecture that was tried and why was it chosen?
+The first architecture was more simple, having no dropouts, no batch normalization, fewer layers, and it was evolving as I was researching and experimenting.
+
 * What were some problems with the initial architecture?
-* How was the architecture adjusted and why was it adjusted? Typical adjustments could include choosing a different model architecture, adding or taking away layers (pooling, dropout, convolution, etc), using an activation function or changing the activation function. One common justification for adjusting an architecture would be due to overfitting or underfitting. A high accuracy on the training set but low accuracy on the validation set indicates over fitting; a low accuracy on both sets indicates under fitting.
-* Which parameters were tuned? How were they adjusted and why?
-* What are some of the important design choices and why were they chosen? For example, why might a convolution layer work well with this problem? How might a dropout layer help with creating a successful model?
-
-If a well known architecture was chosen:
-* What architecture was chosen?
-* Why did you believe it would be relevant to the traffic sign application?
-* How does the final model's accuracy on the training, validation and test set provide evidence that the model is working well?
+Actually not much was wrong, the results were not very bad, 91% accuracy on test dataset, but to push a 1% increment required a lot of effort and time experimenting. 
  
-
 ### Test a Model on New Images
 
 #### 1. Choose five German traffic signs found on the web and provide them in the report. For each image, discuss what quality or qualities might be difficult to classify.
 
-Here are five German traffic signs that I found on the web:
+I've downloaded 5 images from the web and run the prediction model, here are the results
 
-![alt text][image4] ![alt text][image5] ![alt text][image6] 
-![alt text][image7] ![alt text][image8]
+![alt text][p_sample]
 
-The first image might be difficult to classify because ...
-
-#### 2. Discuss the model's predictions on these new traffic signs and compare the results to predicting on the test set. At a minimum, discuss what the predictions were, the accuracy on these new predictions, and compare the accuracy to the accuracy on the test set (OPTIONAL: Discuss the results in more detail as described in the "Stand Out Suggestions" part of the rubric).
-
-Here are the results of the prediction:
-
-| Image			        |     Prediction	        					| 
-|:---------------------:|:---------------------------------------------:| 
-| Stop Sign      		| Stop sign   									| 
-| U-turn     			| U-turn 										|
-| Yield					| Yield											|
-| 100 km/h	      		| Bumpy Road					 				|
-| Slippery Road			| Slippery Road      							|
-
-
-The model was able to correctly guess 4 of the 5 traffic signs, which gives an accuracy of 80%. This compares favorably to the accuracy on the test set of ...
-
-#### 3. Describe how certain the model is when predicting on each of the five new images by looking at the softmax probabilities for each prediction. Provide the top 5 softmax probabilities for each image along with the sign type of each probability. (OPTIONAL: as described in the "Stand Out Suggestions" part of the rubric, visualizations can also be provided such as bar charts)
-
-The code for making predictions on my final model is located in the 11th cell of the Ipython notebook.
-
-For the first image, the model is relatively sure that this is a stop sign (probability of 0.6), and the image does contain a stop sign. The top five soft max probabilities were
-
-| Probability         	|     Prediction	        					| 
-|:---------------------:|:---------------------------------------------:| 
-| .60         			| Stop sign   									| 
-| .20     				| U-turn 										|
-| .05					| Yield											|
-| .04	      			| Bumpy Road					 				|
-| .01				    | Slippery Road      							|
-
-
-For the second image ... 
 
 ### (Optional) Visualizing the Neural Network (See Step 4 of the Ipython notebook for more details)
 #### 1. Discuss the visual output of your trained network's feature maps. What characteristics did the neural network use to make classifications?
 
+This has been very fun, seeing how the model actually works on each convolution layer, and understanding how the computer "sees" the information.
+
+In the first layer we can still see something that resembles the picture  
+![alt text][o_layer1]
+
+But when we get to the second convolution network, it's not clear anymore for us.
+![alt text][o_layer2]
